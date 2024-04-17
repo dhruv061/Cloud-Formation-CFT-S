@@ -1,0 +1,51 @@
+# Create EC2 instace with cloud formation that create security group by asking SG name, to create key pait it also ask for name of key pair and other paramater.
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Test
+
+Parameters:
+  KeyName:
+    Type: String
+    Description: Name of the EC2 Key Pair
+
+
+  VpcId:
+    Type: String
+    Description: ID of the VPC where the security group will be created
+    Default: vpc-05bd10a5b5a0bb91a  
+
+  SubnetId:
+    Type: String
+    Description: ID of the VPC where the security group will be created
+    Default: subnet-0041976a6a3c5248c
+
+Resources: 
+  myKeyPair:
+    Type: AWS::EC2::KeyPair
+    Properties:
+      KeyName: !Ref KeyName
+      # Add other properties as needed
+
+  mySecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for myEC2Instance
+      VpcId: !Ref VpcId
+      # Add other properties as needed
+
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0  # Example, allow SSH from anywhere
+
+  myEC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-007020fd9c84e18c7 #it's ubuntu image id that we see at time creation of ec2
+      KeyName: !Ref KeyName
+      InstanceType: t2.micro
+      Monitoring: true
+      SecurityGroupIds:
+        - !Ref mySecurityGroup
+      SubnetId: !Ref SubnetId
+
