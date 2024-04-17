@@ -1,0 +1,174 @@
+#This CFT Configure VPC Completely and inside same VPC luanches one EC2
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: This CFT for full VPC creation and inside one public subnet one EC2 lunch
+
+Parameters:
+  #-------------For VPC----------------#
+  VpcCIDR:
+    Description: CIDR block for the VPC
+    Type: String
+    Default: 10.0.0.0/16
+
+  PublicSubnetCIDR:
+    Description: CIDR block for the public subnet
+    Type: String
+    Default: 10.0.1.0/24
+    
+  PrivateSubnetCIDR:
+    Description: CIDR block for the private subnet
+    Type: String
+    Default: 10.0.2.0/24
+
+  #-------------For EC2----------------#
+  KeyName:
+    Type: String
+    Description: Name of the existing EC2 Key Pair
+
+Resources:
+  #-------------------------------------------VPC Set-UP-----------------------------------------------#
+  #step-1: craete ONE VPC
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCIDR
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: MyVPC
+
+  #step-2: create 2 subnets foe 1 AZ
+  # subnet-1 --> public subnet
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PublicSubnetCIDR
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: PublicSubnet
+
+  # subnet-2 --> private subnet
+  PrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PrivateSubnetCIDR
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      Tags:
+        - Key: Name
+          Value: PrivateSubnet
+
+  # step-3: Create IGW (Internet Gateway) & Attach to the VPC
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: InternetGateway
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # Step 04. Create Public and Private Route Table with it's route
+  # Public route table
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: PublicRouteTable
+  
+  DefaultPublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  # Private route table
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: PrivateRouteTable
+ 
+  DefaultPrivateRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      #this is for step-8 [To add Nat gatway that present in public subnet]
+      NatGatewayId: !Ref NatGateway
+ 
+  #Step 06 (A). Add Public Subnet in Public Route table
+  PublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+      
+  #Step 06 (B). Add Private Subnet in Private Route table
+  PrivateSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet
+      RouteTableId: !Ref PrivateRouteTable
+  
+  # Step 7: Create a NAT Gateway in Public Subnet
+  NatGatewayEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGatewayEIP.AllocationId
+      SubnetId: !Ref PublicSubnet
+
+  # Step 8: Add NAT Gateway into the Private Route Table
+  # --> for thsi we added "NatGatewayId" with this NAT gateway in private route table 
+
+  #default security group for VPC
+  DefaultSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Default security group for the VPC
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: DefaultSecurityGroup
+
+  #-------------------------------------------EC2 in this VPC-----------------------------------------------#
+  mySecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for myEC2Instance
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0  # Example, allow SSH from anywhere
+
+  myEC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-007020fd9c84e18c7 #it's ubuntu image id that we see at time creation of ec2
+      KeyName: !Ref KeyName
+      InstanceType: t2.micro
+      Monitoring: true
+      SecurityGroupIds:
+        - !Ref mySecurityGroup
+      SubnetId: !Ref PublicSubnet 

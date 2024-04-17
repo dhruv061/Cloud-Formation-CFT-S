@@ -7,7 +7,6 @@ Parameters:
     Type: String
     Description: Name of the EC2 Key Pair
 
-
   VpcId:
     Type: String
     Description: ID of the VPC where the security group will be created
