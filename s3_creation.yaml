@@ -1,0 +1,15 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: S3x bucket creation CFT
+
+Parameters:
+  BucketName:
+    Description: Name for the S3 bucket
+    Type: String
+    AllowedPattern: ^[a-z0-9][a-z0-9.-]*[a-z0-9]$
+    ConstraintDescription: Must be a valid S3 bucket name.
+
+Resources:
+  MyS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref BucketName
