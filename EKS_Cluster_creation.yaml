@@ -1,0 +1,388 @@
+#This CFT create full VPC with 2 public subnets & 2 private subnet with all VPC components
+#After VPC is created one EKS Cluster is created on this VPC
+#Also created one EC2 in public subnet
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: This CFT for full VPC creation and inside one public subnet one EC2 lunch & EKS Cluster& one EC2 in public subnet
+
+Parameters:
+  #================================================================================#
+  #------------------------------------For VPC-------------------------------------#
+  #================================================================================#
+  VpcCIDR:
+    Description: CIDR block for the VPC
+    Type: String
+    Default: 10.0.0.0/16
+
+  PublicSubnetCIDRONE:
+    Description: CIDR block for the public subnet
+    Type: String
+    Default: 10.0.0.0/18	
+
+  PublicSubnetCIDRTWO:
+    Description: CIDR block for the public subnet
+    Type: String
+    Default: 10.0.64.0/18
+    
+  PrivateSubnetCIDRONE:
+    Description: CIDR block for the private subnet
+    Type: String
+    Default: 10.0.128.0/18
+
+  PrivateSubnetCIDRTWO:
+    Description: CIDR block for the private subnet
+    Type: String
+    Default: 10.0.192.0/18
+  
+  #====================================#
+  #-------------For EC2----------------#
+  #====================================#
+  KeyName:
+    Type: String
+    Description: Name of the existing EC2 Key Pair
+ 
+  #===================================================================================#
+  #--------------------------------------For EKS--------------------------------------#
+  #===================================================================================#
+  ClusterName:
+    Type: String
+    Description: Name of the EKS cluster
+    Default: eks
+
+  NodeGroupName:
+    Type: String
+    Description: Name of the EKS node group
+    Default: NodeGrpName
+
+  NodeInstanceType:
+    Type: String
+    Description: EC2 instance type for the worker nodes
+    Default: t3.medium
+
+  DesiredCapacity:
+    Type: Number
+    Description: Desired number of worker nodes
+    Default: 1
+    MinValue: 1
+    MaxValue: 1
+
+Resources:
+  #====================================================================================================#
+  #-------------------------------------------VPC Set-UP [2 subnets in 2 dffrent AZ's]-----------------------------------------------#
+  #====================================================================================================#
+  #step-1: craete ONE VPC
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCIDR
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: MyVPC
+
+  #step-2: create 2 subnets foe 2 diffrent AZ
+  # Define two public subnets in different AZs
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PublicSubnetCIDRONE
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: PublicSubnet1
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PublicSubnetCIDRTWO
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: PublicSubnet2
+
+  # subnet-2 --> 2 private subnet
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PrivateSubnetCIDRONE
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      Tags:
+        - Key: Name
+          Value: PrivateSubnet1
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PrivateSubnetCIDRTWO
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      Tags:
+        - Key: Name
+          Value: PrivateSubnet2
+
+  # step-3: Create IGW (Internet Gateway) & Attach to the VPC
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: InternetGateway
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # Step 04. Create Public and Private Route Table with it's route
+  # Public route table
+  PublicRouteTable1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: PublicSubnet1
+
+  PublicRouteTable2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: PublicSubnet2
+        
+  DefaultPublicRoute1:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable1
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  DefaultPublicRoute2:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable2
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  # Private route table
+  PrivateRouteTable1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: PrivateRouteTable1
+
+  PrivateRouteTable2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: PrivateRouteTable2
+ 
+  DefaultPrivateRoute1:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      DestinationCidrBlock: 0.0.0.0/0
+      #this is for step-8 [To add Nat gatway that present in public subnet]
+      NatGatewayId: !Ref NatGateway1
+ 
+  DefaultPrivateRoute2:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable2
+      DestinationCidrBlock: 0.0.0.0/0
+      #this is for step-8 [To add Nat gatway that present in public subnet]
+      NatGatewayId: !Ref NatGateway2
+
+  #Step 06 (A). Add Public Subnet in Public Route table
+  PublicSubnetRouteTableAssociation1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable1
+  
+  PublicSubnetRouteTableAssociation2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable2
+      
+  #Step 06 (B). Add Private Subnet in Private Route table
+  PrivateSubnetRouteTableAssociation1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivateRouteTable1
+  
+  PrivateSubnetRouteTableAssociation2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable2
+
+  # Step 7: Create a NAT Gateway in Public Subnet
+  NatGatewayEIP1:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  NatGatewayEIP2:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  NatGateway1:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGatewayEIP1.AllocationId
+      SubnetId: !Ref PublicSubnet1
+      Tags:
+        - Key: Name
+          Value: NatGatway-1
+  NatGateway2:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGatewayEIP2.AllocationId
+      SubnetId: !Ref PublicSubnet2
+      Tags:
+        - Key: Name
+          Value: NatGatway-2
+
+  # Step 8: Add NAT Gateway into the Private Route Table
+  # --> for this we added "NatGatewayId" with this NAT gateway in private route table 
+
+  #default security group for VPC
+  DefaultSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Default security group for the VPC
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: DefaultSecurityGroupForVPC
+  
+  #=========================================================================================================#
+  #-------------------------------------------EC2 in this VPC-----------------------------------------------#
+  #=========================================================================================================#
+  mySecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for myEC2Instance
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0  # Example, allow SSH from 
+      Tags:
+        - Key: Name
+          Value: DefaultSecurityGroupForEC2
+
+  myEC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-007020fd9c84e18c7 #it's ubuntu image id that we see at time creation of ec2
+      KeyName: !Ref KeyName
+      InstanceType: t2.micro
+      Monitoring: true
+      SecurityGroupIds:
+        - !Ref mySecurityGroup
+      SubnetId: !Ref PublicSubnet1
+      Tags:
+        - Key: Name
+          Value: CFTEC2
+  #===================================================================================#
+  #--------------------------------------For EKS--------------------------------------#
+  #===================================================================================#
+
+  EKSClusterSetUp:
+    Type: AWS::EKS::Cluster
+    Properties:
+      Name: !Ref ClusterName
+      RoleArn: !GetAtt EKSClusterRole.Arn
+      ResourcesVpcConfig:
+        SecurityGroupIds:
+          - !Ref ClusterSecurityGroup
+        #Use public subnet id that we created in VPC
+        SubnetIds: 
+          - !Ref PublicSubnet1 
+          - !Ref PublicSubnet2 
+      Tags:
+        - Key: Name
+          Value: EKS_CFT
+
+  EKSClusterRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ClusterName}-role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: eks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEKSClusterPolicy
+
+  ClusterSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for the EKS cluster
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: EKS_Cluster_SG
+
+  NodeGroup:
+    Type: AWS::EKS::Nodegroup
+    DependsOn: EKSClusterSetUp  # This ensures the NodeGroup is created after the EKS cluster
+    Properties:
+      ClusterName: !Ref ClusterName
+      NodegroupName: !Ref NodeGroupName
+      NodeRole: !GetAtt NodeInstanceRole.Arn
+      Subnets: 
+        - !Ref PublicSubnet1
+      ScalingConfig:
+        DesiredSize: !Ref DesiredCapacity
+        MinSize: 1
+        MaxSize: 10
+      InstanceTypes:
+        - !Ref NodeInstanceType
+
+  NodeInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ClusterName}-node-instance-role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy
+        - arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+
+Outputs:
+  ClusterNameOutput:
+    Description: Name of the EKS cluster
+    Value: !Ref ClusterName
+  NodeGroupNameOutput:
+    Description: Name of the EKS node group
+    Value: !Ref NodeGroupName
